@@ -1,0 +1,224 @@
+---
+title: Generating and visualizing probabilistic projections using the **projections**
+  package
+author: "Ian Durbach"
+date: "06-11-2015"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    theme: united
+    toc: yes
+---
+
+# Overview 
+
+This package is a collection of function to assist with the elicitation of probabilistic projections from experts. Probabilistic projections are sequences of time-ordered observations that describe how some variable, coal prices for example, might evolve over a long period of time, as well as an assessment of the uncertainty around these projections.  
+
+The package, and this vignette, assumes that probability distributions have already been assessed at a selected subset of time points, and that these distributions are represented by trapezoidal probability distributions. The functions in this package generate probabilistic projections by first simulating randomly from the elicited probability distributions, taking into account any desired inter-temporal relationships, and then by simulating values between elicited time points, again taking into account elicited information. Different simulation approaches may be required for the first step depending on the nature of the inter-temporal information. Different approaches may also be taken for the second step depending on the type of desired interpolation (linear, etc).  
+
+This vignette illustrates the use of the package with a simple example. First we need to install the *projections* package
+
+```{r}
+library(projections)
+```
+The package requires some others: MASS, trapezoid, and ggplot2. You should also check that you have these installed. 
+
+```{r}
+library(MASS)
+library(trapezoid)
+library(ggplot2)
+```
+  
+# Generating projections of GDP growth to 2050
+
+## Capturing the elicited distributions 
+
+Suppose we have interviewed an expert and through discussion elicited the following information:
+
+1. The distribution of GDP growth in 2014 is Triangular(2.4,2.5,2.6)
+2. The distribution of GDP growth in 2020 is Triangular(2.5,3,3.5)
+3. The distribution of GDP growth in 2035 is Triangular(1.5,3,6)
+4. The distribution of GDP growth in 2050 is Trapezoidal(1.5,3,4,6)
+5. GDP growth is moderately positively correlated between time-points, say with a correlation of 0.3
+
+This is represented in the following way. Note that we have collected together all the minima, lower bounds on the mode (mode1), upper bounds on the mode (mode2), and maxima. For triangular distributions the lower and upper bounds on the mode coincide.
+
+```{r} 
+x_min = c(2.4,2.5,1.5,1.5)
+x_mode1 = c(2.6,3,3,3)
+x_mode2 = c(2.6,3,3,4)
+x_max = c(2.8,3.5,6,6)
+correls = matrix(0.3,4,4)
+diag(correls) = 1
+```
+You can view one of the distributions, say for 2035, using
+
+```{r fig.width=4, fig.height=4}
+x=seq(from=x_min[3],to=x_max[3],length=100)
+plot(x,y=dtrapezoid(x,x_min[3],x_mode1[3],x_mode2[3],x_max[3]),type="l",
+     xlab="x",ylab="f(x)")
+```
+
+## Generating samples at each of the assessed time points
+
+To generate correlated samples at assessed time points we use
+```{r}
+xe = simulate_at_elic_times(nsims=200,Sigma=correls,x_min,x_mode1,x_mode2,x_max)
+```
+Have a look at the first few samples that you generated
+```{r}
+head(xe)
+```
+
+The *check_keypts* function performs a number of basic checks on the output of the previous step. This is mainly just to check that the simulated samples have the desired statistical properties i.e. those assessed by the expert. To do this
+
+```{r}
+check1 = check_keypts(xe)
+```
+There are 3 outputs stored in a list created by *check_keypts*: a correlation matrix, histograms of the values at each assessed time-point, and a few projections (bearing in mind we haven't done any interpolation yet). To view these 
+
+```{r}
+check1$correlations
+```
+```{r fig.width=6, fig.height=2}
+check1$histograms
+```
+```{r fig.width=6, fig.height=2}
+check1$trajectories
+```
+
+## Generating full probabilistic projections
+
+After checking that everything looks acceptable, we can proceed to interpolate, filling in values for times between the assessed time points. The package has four options
+
+1. *linear.from.points*: Linear interpolation when the assessed points are point-in-time values.
+2. *rwalk.from.points*: A "random walk" algorithm when the assessed points are point-in-time values. 
+3. *linear.from.means*: Linear interpolation when the assessed points are means over time.
+4. *gaussian.from.means*: A `Gaussian' algorithm when the assessed points are means over time.
+
+The first two of these are for when *point-in-time values* have been elicited from the expert at each of the assessed time points, as in the example here. The second two are for when *means* have been elicited from the expert covering the periods *between* the assessed time points. We'll consider this second case a bit later.
+
+Linear interpolation is always simplest. To do this we just need to tell the *interpolate_betw_elic_times* function how many values to insert between each of the assessed time points. Below, we used *nperiods=c(5,14,14)*. This means we insert 5 values between the first and second assessed time points, which were 2014 and 2020 respectively --  thus we insert values for years 2015, 2016, 2017, 2018, and 2019. Similarly we insert 14 values between the second and third time point (2020 and 2035); and 14 values between the third and fourth time point (2035 and 2050). Note that we will always have one fewer time `period' (2014-2020,2021-2035,2036-2050) than assessed time points (2014,2020,2035,2050). Also note that the line below generates a projection with 37 values: annual values from 2014 to 2050. This is the sum of the elements in *nperiods* plus the four assessed time points, which are inserted in the appropriate place in the sequence.
+
+```{r}
+xt = interpolate_betw_elic_times(y=xe,nperiods=c(5,14,14),method='linear.from.points')
+```
+
+We can then perform a number of additional checks on the projections. These just provide some summary plots from the generated projections. In the line below, note that we use different values of *nperiods*. Now, we use *nperiods=c(7,15,15)*. This tells the function how to break up the 37 values in the projection into time periods: 7 observations (2014-2020), then 15 (2021-2035), then 15 (2036-2050).
+
+```{r}
+check2 = check_allpts(xt,nperiods=c(7,15,15))
+```
+There are 3 outputs stored in a list created by *check_allpts*: histograms of the values in each time period, histograms of the means of values in each time period, a line plot of a few projections, and a line plot of all the projections. These are shown below
+
+```{r fig.width=6, fig.height=2}
+check2$histograms_points
+```
+```{r fig.width=6, fig.height=2}
+check2$histograms_means
+```
+```{r fig.width=6, fig.height=2}
+check2$sample_trajectories
+```
+```{r fig.width=6, fig.height=2}
+check2$all_trajectories
+```
+
+## Plotting the probabilistic projections
+
+The last step is to create a nice plot showing the projections. The *plot_trajectories* function plots all the generating trajectories and adds some summary indicators indicating various quantiles calculated from the trajectories.
+
+```{r fig.width=6, fig.height=2}
+plot_trajectories(X=xt)
+```
+
+You can use your own quantiles, label points on the *x* axis, insert titles for the *x* and *y* axes, and control the base size of the text.
+```{r fig.width=6, fig.height=2}
+plot_trajectories(X=xt,myprobs=c(0.05,0.2,0.5,0.8,0.95),xlabs=2014:2050,
+                  xtitle="Year",ytitle="GDP growth",basesize=14)
+```
+
+# Other features
+
+## Including mean reversion
+
+In some of our interviews experts indicated that extreme (high or low) values in one time period should be followed by much less extreme values in the next period. This kind of relationship is not amenable to modelling using correlations. Mean reversion is implemented by matching extreme ranks in period *i* with intermediate ranks in period *i+1*. See the help file for *simulate_at_elic_times* for more details. Mean reversion is specified by the *mean_rev* option, a (1 x E) vector containing a binary indicator of whether or not mean reversion applies in the following time period. If a 1 appears at assessed time point *i*, then extreme values in time period *i* will be followed by less extreme values in time period *i+1*. 
+
+For example, if extreme values at 2035 should be followed by less extreme values at 2050 we specify this as
+
+```{r fig.width=6, fig.height=2}
+xe = simulate_at_elic_times(nsims=200,Sigma=correls,x_min,x_mode1,x_mode2,x_max,
+                            mean_rev=c(0,0,1,0))
+xt = interpolate_betw_elic_times(y=xe,nperiods=c(5,14,14),method='linear.from.points')
+plot_trajectories(X=xt,xlabs=2014:2050,xtitle="Year",ytitle="GDP growth")
+```
+
+## Generating projections when the assessed quantities are means
+
+Sometimes the quantities assessed from the expert are means over some time period rather than values at a specific point in time. For example, in the previous example we might imagine the expert assessing *mean* GDP growth in the periods 2014-2020, 2021-2035, and 2036-2050, rather than GDP growth *in* 2014, 2020, 2035, and 2050. For illustration purposes suppose we keep the same number as before but change their interpretation, so:
+
+1. The distribution of mean GDP growth in 2014 is Triangular(2.4,2.5,2.6)
+2. The distribution of mean GDP growth in 2014-2020 is Triangular(2.5,3,3.5)
+3. The distribution of mean GDP growth in 2021-2035 is Triangular(1.5,3,6)
+4. The distribution of mean GDP growth in 2036-2050 is Trapezoidal(1.5,3,4,6)
+5. Mean GDP growth is moderately positively correlated between time-points, say with a correlation of 0.3
+
+We can again generate correlated samples at assessed time points using exactly the same call to the *simulate_at_elic_times* function as before (since *xe* should still be in memory, you don't need to run the line below).
+```{r}
+xe = simulate_at_elic_times(nsims=200,Sigma=correls,x_min,x_mode1,x_mode2,x_max,
+                            mean_rev=c(0,0,1,0))
+```
+What changes in not the simulation of samples at the assessed time points (which now represent end-points of periods rather than points-in-time) but the interpolation of points within each period. We therefore use one of the interpolation methods *linear.from.means* or *gaussian.from.means* in the line below. Note that we use *nperiods=c(7,15,15)*. This tells the function how many observations to generate for each of the time periods: 7 observations (2014-2020), then 15 (2021-2035), then 15 (2036-2050). The end result is 37 observations per projection, as before.
+
+```{r}
+xt = interpolate_betw_elic_times(y=xe,nperiods=c(7,15,15),method='linear.from.means')
+```
+
+We can again check summary plots of the sequences -- note how the histograms of values is more dispersed than the histogram of means, indicating greater variability in the former.
+
+```{r}
+check2 = check_allpts(xt,nperiods=c(7,15,15))
+```
+```{r fig.width=6, fig.height=2}
+check2$histograms_points
+```
+```{r fig.width=6, fig.height=2}
+check2$histograms_means
+```
+
+Finally we can plot the trajectories. Although the assessed quantities are means, the projections contain forecasts of GDP growth at each time point i.e. forecasts of annual GDP growth to 2050.
+
+```{r fig.width=6, fig.height=2}
+plot_trajectories(X=xt,myprobs=c(0.01,0.2,0.5,0.8,0.99),xlabs=2014:2050,xtitle="Year",ytitle="GDP growth")
+```
+
+## Fancier interpolation methods
+
+Linear interpolation is suitable for many applications where the uncertainties inherent in long-range forecasting overwhelm any period-to-period variation. In other applications it might be nice to include some kind of period-to-period variability. There are two functions for doing this: one applies when values have been assessed as point-in-time values (*rwalk.from.values*) and one when values have been assessed as means (*gaussian.from.means*). These are experimental functions and should be used with caution, as sometimes they can lead to quite strange-looking projections.
+
+### Random walk interpolation between assessed point-in-time values
+
+The basic idea of the random walk algorithm is to fix the end points in each time period, and then generate the points in-between as a random walk, subject to some drift and constraints an period-to-period change. It works as in the previous examples, except that an additional parameter *alpha* must be specified. This is a multiplier controlling the size of the random steps between adjacent time points (e.g. year-to-year) in the constructed sequence. 
+
+```{r}
+xt = interpolate_betw_elic_times(y=xe,nperiods=c(5,14,14),method='rwalk.from.points',
+                                 alpha=5)
+```
+```{r fig.width=6, fig.height=2}
+plot_trajectories(X=xt,xlabs=2014:2050,xtitle="Year",ytitle="GDP growth")
+```
+
+Unfortunately, specifying *alpha* can be tricky, and so the random walk algorithm should be used with caution. See the help files for more details. 
+
+### Gaussian interpolation with assessed means
+
+The basic idea of the "Gaussian" algorithm is to generate points with the assessed mean in each time period, and then add some random noise to these. It works as in the previous examples, except that an additional parameter *maxchange* must be specified. This gives the estimated maximum possible change between adjacent time points (e.g. year-to-year) in the constructed sequence. The standard deviation of the added noise term is 1/6 of *maxchange* i.e. a six-sigma range. Also note that because we assume that *means* have been assessed, we need to specify that *nperiods=c(7,15,15)*.
+ 
+```{r}
+xt = interpolate_betw_elic_times(y=xe,nperiods=c(7,15,15),method='gaussian.from.means',
+                                 maxchange=3)
+```
+```{r fig.width=6, fig.height=2}
+plot_trajectories(X=xt,xlabs=2014:2050,xtitle="Year",ytitle="GDP growth")
+```

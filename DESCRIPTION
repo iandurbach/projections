@@ -1,0 +1,10 @@
+Package: projections
+Type: Package
+Title: Generating and visualizing samples from elicited probability distributions
+Version: 1.0
+Date: 2015-12-09
+Authors@R: person("Ian", "Durbach", email = "indurbach@gmail.com", role = c("aut", "cre"))
+Description: Accompanies the working papers "Using expert elicitation to characterize input uncertainty in E3 forecasting models" and "Probabilistic projections of baseline greenhouse gas emissions in South Africa to 2050".
+Imports: MASS, trapezoid, ggplot2
+License: GPL-2
+LazyData: TRUE
